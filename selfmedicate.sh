@@ -16,10 +16,10 @@ then
 fi
 
 CPUS=${CPUS:=2}
-MEMORY=${MEMORY:=8192}
-VMDRIVER=${VMDRIVER:="none"}
-LESSON_DIRECTORY=${LESSON_DIRECTORY:="/antidote"}
-MINIKUBE=${MINIKUBE:="sudo minikube"}
+MEMORY=${MEMORY:=5192}
+VMDRIVER=${VMDRIVER:="virtualbox"}
+LESSON_DIRECTORY=${LESSON_DIRECTORY:="../nrelabs-curriculum"}
+MINIKUBE=${MINIKUBE:="minikube"}
 KUBECTL=${KUBECTL:="kubectl"}
 PRELOADED_IMAGES=${PRELOADED_IMAGES:="vqfx-snap1 vqfx-snap2 vqfx-snap3 utility"}
 ANTIDOTEVERSION=${ANTIDOTEVERSION:="release-v0.4.0"}
@@ -49,7 +49,7 @@ sub_help(){
     echo "$PROGNAME <subcommand> -h|--help"
     echo ""
 }
-  
+
 sub_resume(){
 
     $MINIKUBE config set WantReportErrorPrompt false
@@ -109,7 +109,7 @@ sub_start(){
 	sudo tar zxvf cniplugins.tgz -C /opt/cni/bin  > /dev/null 2>&1
 	sudo curl -L https://github.com/nre-learning/plugins/blob/master/bin/antibridge?raw=true -o /opt/cni/bin/antibridge  > /dev/null 2>&1 && sudo chmod a+x /opt/cni/bin/antibridge > /dev/null 2>&1
 	rm -f cniplugins.tgz  > /dev/null 2>&1
-	
+
 	sudo mkdir -p /etc/cni/net.d
 	sudo cp manifests/multus-cni.conf /etc/cni/net.d/1-multus.conf
     echo "Creating minikube cluster. This can take a few minutes, please be patient..."
@@ -124,9 +124,9 @@ sub_start(){
 
     echo -e "\nThe minikube cluster ${WHITE}is now online${NC}. Now, we need to add some additional infrastructure components.\n"
     echo -e "\n${YELLOW}This will take some time${NC} - this script will pre-download large images so that you don't have to later. BE PATIENT.\n"
-	
+
 	sudo chown -R $USER $HOME/.kube $HOME/.minikube
-	
+
     $KUBECTL apply -f "https://cloud.weave.works/k8s/net?k8s-version=$($KUBECTL version | base64 | tr -d '\n')"
     $KUBECTL create -f manifests/multusinstall.yml
 
@@ -180,7 +180,7 @@ sub_start(){
 		# Add 3 second sleep due to docker timeout issue
 		sleep 3
     done
-    
+
 }
 
 sub_reload(){
@@ -259,4 +259,3 @@ case $subcommand in
 esac
 
 exit 0
-
