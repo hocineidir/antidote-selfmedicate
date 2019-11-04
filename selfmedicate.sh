@@ -16,14 +16,14 @@ then
 fi
 
 CPUS=${CPUS:=2}
-MEMORY=${MEMORY:=5192}
+MEMORY=${MEMORY:=5396}
 VMDRIVER=${VMDRIVER:="virtualbox"}
 LESSON_DIRECTORY=${LESSON_DIRECTORY:="../nrelabs-curriculum"}
 MINIKUBE=${MINIKUBE:="minikube"}
 KUBECTL=${KUBECTL:="kubectl"}
 PRELOADED_IMAGES=${PRELOADED_IMAGES:="vqfx-snap1 vqfx-snap2 vqfx-snap3 utility"}
 ANTIDOTEVERSION=${ANTIDOTEVERSION:="release-v0.4.0"}
-K8SVERSION=${K8SVERSION:="v1.14.0"}  # Needs to reflect the targeted version the Antidoteplatform was built against.
+K8SVERSION=${K8SVERSION:="v1.14.0"}
 
 # Checking for prerequisites
 command -v $MINIKUBE > /dev/null
@@ -61,13 +61,15 @@ sub_resume(){
     fi
 
     $MINIKUBE start \
-        --cpus $CPUS \
-        --memory $MEMORY \
-        --vm-driver $VMDRIVER \
-        --network-plugin=cni \
-        --extra-config=kubelet.network-plugin=cni \
-        --kubernetes-version=$K8SVERSION
+        --mount --mount-string="$LESSON_DIRECTORY:/antidote" \
+        --cpus $CPUS --memory $MEMORY --vm-driver $VMDRIVER --network-plugin=cni --extra-config=kubelet.network-plugin=cni --kubernetes-version=$K8SVERSION
 
+
+    echo "About to modify /etc/hosts to add record for 'antidote-local' at IP address $($MINIKUBE ip)."
+    echo "You will now be prompted for your sudo password."
+    sudo sed '/antidote-local.*/d' /etc/hosts  > /tmp/hosts.tmp
+    sudo mv /tmp/hosts.tmp /etc/hosts
+    echo "$($MINIKUBE ip)    antidote-local" | sudo tee -a /etc/hosts  > /dev/null
     echo -e "${GREEN}Finished!${NC} Antidote should now be available at http://antidote-local:30001/"
 }
 
@@ -104,31 +106,29 @@ sub_start(){
         fi
     fi
 
-	sudo mkdir -p /opt/cni/bin  > /dev/null 2>&1
-	curl -L -o cniplugins.tgz https://github.com/containernetworking/plugins/releases/download/v0.8.1/cni-plugins-linux-amd64-v0.8.1.tgz  > /dev/null 2>&1
-	sudo tar zxvf cniplugins.tgz -C /opt/cni/bin  > /dev/null 2>&1
-	sudo curl -L https://github.com/nre-learning/plugins/blob/master/bin/antibridge?raw=true -o /opt/cni/bin/antibridge  > /dev/null 2>&1 && sudo chmod a+x /opt/cni/bin/antibridge > /dev/null 2>&1
-	rm -f cniplugins.tgz  > /dev/null 2>&1
-
-	sudo mkdir -p /etc/cni/net.d
-	sudo cp manifests/multus-cni.conf /etc/cni/net.d/1-multus.conf
     echo "Creating minikube cluster. This can take a few minutes, please be patient..."
     $MINIKUBE config set WantReportErrorPrompt false
     $MINIKUBE start \
-    --cpus $CPUS \
-    --memory $MEMORY \
-    --vm-driver $VMDRIVER \
-    --network-plugin=cni \
-    --extra-config=kubelet.network-plugin=cni \
-    --kubernetes-version=v1.14.0  # Needs to reflect the targeted version the platform was built against.
+    --mount --mount-string="$LESSON_DIRECTORY:/antidote" \
+    --cpus $CPUS --memory $MEMORY --vm-driver $VMDRIVER --network-plugin=cni --extra-config=kubelet.network-plugin=cni --kubernetes-version=$K8SVERSION
+
+
+    set +e
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $($MINIKUBE ssh-key) \
+        manifests/multus-cni.conf docker@$($MINIKUBE ip):/home/docker/multus.conf  > /dev/null 2>&1
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $($MINIKUBE ssh-key) -t docker@$($MINIKUBE ip) \
+        "sudo cp /home/docker/multus.conf /etc/cni/net.d/1-multus.conf"  > /dev/null 2>&1
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $($MINIKUBE ssh-key) -t docker@$($MINIKUBE ip) \
+        "sudo systemctl restart localkube"  > /dev/null 2>&1
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $($MINIKUBE ssh-key) -t docker@$($MINIKUBE ip) \
+        "sudo curl -L https://github.com/nre-learning/plugins/blob/master/bin/antibridge?raw=true -o /opt/cni/bin/antibridge && sudo chmod a+x /opt/cni/bin/antibridge"  > /dev/null 2>&1
+    set -e
 
     echo -e "\nThe minikube cluster ${WHITE}is now online${NC}. Now, we need to add some additional infrastructure components.\n"
     echo -e "\n${YELLOW}This will take some time${NC} - this script will pre-download large images so that you don't have to later. BE PATIENT.\n"
 
-	sudo chown -R $USER $HOME/.kube $HOME/.minikube
-
-    $KUBECTL apply -f "https://cloud.weave.works/k8s/net?k8s-version=$($KUBECTL version | base64 | tr -d '\n')"
-    $KUBECTL create -f manifests/multusinstall.yml
+    $KUBECTL apply -f "https://cloud.weave.works/k8s/net?k8s-version=$($KUBECTL version | base64 | tr -d '\n')" > /dev/null
+    $KUBECTL create -f manifests/multusinstall.yml > /dev/null
 
     print_progress() {
         percentage=$1
@@ -145,7 +145,7 @@ sub_start(){
         running_system_pods=$($KUBECTL get pods -n=kube-system | grep Running | wc -l)
         percentage="$( echo "$running_system_pods/$total_system_pods" | bc -l )"
         echo -ne $(print_progress $percentage) "${YELLOW}Installing additional infrastructure components...${NC}\r"
-        sleep 5
+        sleep 1
     done
 
     # Clear line and print finished progress
@@ -163,24 +163,32 @@ sub_start(){
         running_platform_pods=$($KUBECTL get pods | grep Running | wc -l)
         percentage="$( echo "$running_platform_pods/$total_platform_pods" | bc -l )"
         echo -ne $(print_progress $percentage) "${YELLOW}Starting the antidote platform...${NC}\r"
-        sleep 5
+        sleep 1
     done
 
     # Clear line and print finished progress
     echo -ne "$pc%\033[0K\r"
     echo -ne $(print_progress 1) "${GREEN}Done.${NC}\n"
-	# Moved antidote up message to before image pull due to docker timeout issues.
-    echo -e "${GREEN}Finished!${NC} Antidote should now be available at http://antidote-local:30001/"
 
     # Pre-download large common images
     for i in $(echo $PRELOADED_IMAGES)
     do
-        echo -e "${YELLOW}Pre-emptively pulling image antidotelabs/$i...${NC}\n"
-		sudo docker pull antidotelabs/$i > /dev/null 2>&1
-		# Add 3 second sleep due to docker timeout issue
-		sleep 3
+        echo -ne $(print_progress $percentage) "${YELLOW}Pre-emptively pulling image antidotelabs/$i...${NC}\r"
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $($MINIKUBE ssh-key) -t docker@$($MINIKUBE ip) \
+                "docker pull antidotelabs/$i" > /dev/null 2>&1
+
+        # Clear line and print finished progress
+        echo -ne "$pc%\033[0K\r"
+        echo -ne $(print_progress 1) "${GREEN}Done.${NC}\n"
     done
 
+    echo "About to modify /etc/hosts to add record for 'antidote-local' at IP address $($MINIKUBE ip)."
+    echo "You will now be prompted for your sudo password."
+    sudo sed '/antidote-local.*/d' /etc/hosts  > /tmp/hosts.tmp
+    sudo mv /tmp/hosts.tmp /etc/hosts
+    echo "$($MINIKUBE ip)    antidote-local" | sudo tee -a /etc/hosts  > /dev/null
+
+    echo -e "${GREEN}Finished!${NC} Antidote should now be available at http://antidote-local:30001/"
 }
 
 sub_reload(){
