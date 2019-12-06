@@ -17,7 +17,7 @@ fi
 
 CPUS=${CPUS:=2}
 MEMORY=${MEMORY:=5396}
-VMDRIVER=${VMDRIVER:="virtualbox"}
+VMDRIVER=${VMDRIVER:="hyperkit"}
 LESSON_DIRECTORY=${LESSON_DIRECTORY:="../nrelabs-curriculum"}
 MINIKUBE=${MINIKUBE:="minikube"}
 KUBECTL=${KUBECTL:="kubectl"}
@@ -64,16 +64,6 @@ sub_resume(){
         --mount --mount-string="$LESSON_DIRECTORY:/antidote" \
         --cpus $CPUS --memory $MEMORY --vm-driver $VMDRIVER --network-plugin=cni --extra-config=kubelet.network-plugin=cni --kubernetes-version=$K8SVERSION
 
-
-
-    #Kubevirt installation => to put in sub_start() for first launch
-    $KUBECTL create namespace kubevirt
-    $MINIKUBE ssh -- test -e /dev/kvm \ || $KUBECTL create configmap -n kubevirt kubevirt-config --from-literal debug.useEmulation=true
-    $KUBECTL apply -f https://github.com/kubevirt/kubevirt/releases/download/v0.22.0/kubevirt-operator.yaml
-    $KUBECTL apply -f https://github.com/kubevirt/kubevirt/releases/download/v0.22.0/kubevirt-cr.yaml
-    $KUBECTL wait --timeout=180s --for=condition=Available -n kubevirt kv/kubevirt
-    curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v0.23.0/virtctl-v0.23.0-darwin-amd64
-    chmod +x virtctl
 
     echo "About to modify /etc/hosts to add record for 'antidote-local' at IP address $($MINIKUBE ip)."
     echo "You will now be prompted for your sudo password."
@@ -165,6 +155,15 @@ sub_start(){
     $KUBECTL create -f manifests/nginx-controller.yaml > /dev/null
     $KUBECTL create -f manifests/syringe-k8s.yaml > /dev/null
     $KUBECTL create -f manifests/antidote-web.yaml > /dev/null
+
+    #Kubevirt installation => to put in sub_start() for first launch
+    $KUBECTL create namespace kubevirt
+    $MINIKUBE ssh -- test -e /dev/kvm \ || $KUBECTL create configmap -n kubevirt kubevirt-config --from-literal debug.useEmulation=true
+    $KUBECTL apply -f https://github.com/kubevirt/kubevirt/releases/download/v0.22.0/kubevirt-operator.yaml
+    $KUBECTL apply -f https://github.com/kubevirt/kubevirt/releases/download/v0.22.0/kubevirt-cr.yaml
+    $KUBECTL wait --timeout=180s --for=condition=Available -n kubevirt kv/kubevirt
+    curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v0.23.0/virtctl-v0.23.0-darwin-amd64
+    chmod +x virtctl
 
     running_platform_pods=0
     total_platform_pods=$($KUBECTL get pods | tail -n +2 | wc -l)
